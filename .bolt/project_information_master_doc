@@ -1,0 +1,285 @@
+Create the app, rememoir.
+
+Rememoir is a software product that allows people (buyers/project owners) to give others (the subject) the ability to answer questions via recording their voice on a public page, answering questions based on prompts. The answers are then transcribed and turned into a short story/chapter by an Ai model. Once enough stories have been completed, the buyer can order that a book be printed containing the stories.
+
+Some of the key aspects, functions and workflows:
+The person buying the gift will pay a one time fee on a stripe hosted link. Upon successful payment intent complete, a webhook will trigger a user creation in Supabase. The user should then receive a magic link via email and after clicking it, they will set a password, they then get sent to project-setup (provided they meet conditions set out below in doc).
+Each user can have multiple projects if they want. The ‘subject’ (person the book is about) can be someone they choose to give a Rememoir to, or they themselves can be the subject.
+A project must have:
+A ‘profile’; information about the subject who the book will be about such as the place they grew up, their education, career, major life events etc.
+A ‘scheduling’; the period by which ‘prompts’ are sent to the subject (via email) (weekly on Tuesday etc.) and the preferred time (including a time zone field). This will also have an email field for where the prompts will be sent, the ‘subjects’ email.
+A start date and time; when the subject will receive the first email.
+A project is only considered ‘set up’ once all of these details have been added.
+The purchaser will have access to a dashboard/web app (future ios and android app) that has the following pages and features:
+‘Stories’ page; a place where completed stories can be viewed. This page allows the purchaser (project owner) to:
+Edit the story text.
+Listen to the original voice recordings.
+See the ‘prompted by {{name}}’ (who added the prompt)/
+See the creation date and time.
+‘Prompts’ page; a place where the prompts can be viewed, added and edited. More details:
+The Prompt page has two sections. On top are the added prompts (unused only; the ones that weren’t used for a story yet) and then underneath is a list of Ai suggested prompts.
+Added prompts have displayed information such as:
+The prompt.
+The name of the person who added the prompt.
+A voice recording of the person who added the prompt, asking the prompt. (Prompt adder to subject: “Hey {{mom}}, I want to know x).
+The product owner can:
+Edit prompts.
+Delete prompts.
+The page has an ‘Add Prompt’ button that triggers a modal pop up. It asks for:
+Prompt.
+‘Record Prompt’ (In-page voice recording feature).
+In the Ai suggested prompts section, the project owner can:
+Modify the suggested prompt.
+Delete the suggested prompt.
+‘Add’ the suggested prompt - adding it to the added prompts list. This opens a modal asking for the ‘Record Prompt’ and then upon submission, changes the ai prompt suggestion to an added prompt, with the submitter as the ‘Added by’,’Prompted by’.
+‘Settings’ page with the following sections:
+‘Profile’; the information about the memoir subject, added during project setup.
+‘Scheduling’; the same scheduling information as in the project setup.
+‘Collaborators’; the list of other user accounts that have joined the project, showing their name and email address and status. They can also remove the collaborator from the project here and invite new collaborators with a pop up.
+‘Order Book’ page where the project owner can order the book (one included with the original payment). Here they can also:
+Choose to include or exclude stories in the book. (Remove from book button and also include button). (Remove go to bottom under different heading).
+Re-order the stories, selecting which comes first.
+The rest of this page is yet to be decided, as there will be add-ons, up-sells and address requirements etc.
+The dashboard will have a left side menu that includes:
+Navigation to all pages listed above.
+A dropdown with the current project and ability to change to another project, including a ‘Create New Project’ button. The create project button will not do anything yet, the flow needs to be thought out more.
+This menu will cover the full screen on mobile when the burger menu is selected.
+Additional pages that are required for the app:
+‘Sessions’ page, a multi-step page emailed to the subject as scheduled, where the subject opens a public link where they can swipe through the added prompts, which auto-play the audio recordings for the prompt and displays the prompt as they swipe right (or left). It also displays the ‘asked by {{name}}’, the person that added the prompt. The page then operates as follows:
+The subject can click ‘answer’ to a prompt of their choice, which then goes to the recording session step.
+They can listen to the prompt again by clicking on the text and also click the record button to begin telling their story. They can pause and continue recording or stop and restart the recording.
+Once they’re happy with the recording, they can submit.
+Their recording is transcribed, a backend AI workflow comes up with a follow up question, then the follow up question is displayed on the next step.
+There are 2 follow up question steps, with the same recording functionality (second follow up question is also generated after the first follow up question is answered.
+Upon submission of the final answer, the final step in the session presents a page where the user can select their story style:
+First Person.
+Third Person.
+Clean Transcript.
+Upon submission of their selection, the backend creates their story with ai and presents it for the subject to review.
+At the bottom of the review page, there’s a “Make Changes”, which shows another record button, the same as the previous steps. With this feature, the subject can give whatever feedback they want which will be taken into account for a revision. Upon submission of the change request, the backend sends a new AI story for the subject to review. This continues until the subject is happy and then clicks ‘Finish’ or ‘Story Complete’.
+‘Project Setup’ page; mulit-step form for adding the project information:
+Steps include:
+“Who is this Rememoir for?”:
+Gifted Rememoir
+Personal Rememoir
+Profile information (some fields outlined previously).
+Scheduling and start date.
+Review and complete.
+This is the page that all users start on if they (particularly after creating their password after magic link click):
+Own only one project.
+That project has not been set up.
+If a project is incomplete then a warning banner will appear on all pages for that project telling the user that the project has not been set up. The banner will have a button to go to the project setup page.
+
+The landing page and website will be entirely managed though Framer, so this software will be entirely app and functionality related. The funnels and landing pages will be on Framer or elsewhere, so don't worry about it.
+
+--
+You must use:
+
+React + TypeScript, Tailwind, @radix-ui, @shadcn/ui - Ensure an absolutley premium and beautiful design that's highly responsive.
+
+@tanstack/react-query, optional zustand (if appropriate)
+
+Use forms and validation
+
+Implement proper state machines
+
+Use framer motion
+
+use a folder sketelton with best practices, something like this:
+/
+├─ apps/
+│  └─ web/                 # Next.js 14
+├─ packages/
+│  ├─ ui/                  # <Button/>, <PromptCard/>, etc.
+│  ├─ db/                  # zod schemas ↔ Postgres
+│  ├─ api/                 # dummyApi.ts
+│  ├─ workflow/            # XState machines
+│  ├─ hooks/               # React-Query wrappers
+│  └─ utils/               # date, retry, env
+├─ data/                   # seed JSON
+└─ …
+
+--
+You will not be using actual APIs or Supabase auth, the scope of this project is to design the front end so that it's beautiful, responsive and 95% finished. You will leave placeholders for real API call (input as much as you can, even if it's in comments for now) and you will pull dummy data from a json that you create instead.
+
+Ensure that when you use dummy data, there's a note beside it stating that this needs to be replaced with real API call etc. in the future.
+
+--
+Follow best software design practices, ensure a beautifull app, complete all pages and features, with dummy data where necessary.
+
+  Rememoir - Project Information Master Document
+Core Product Description
+Rememoir is a software product that allows people (buyers/project owners) to give others (the subject) the ability to answer questions via recording their voice on a public page, answering questions based on prompts. The answers are then transcribed and turned into a short story/chapter by an AI model. Once enough stories have been completed, the buyer can order that a book be printed containing the stories.
+
+Key Workflows & Functions
+Payment & User Creation Flow
+Person buying the gift pays a one-time fee on a Stripe hosted link
+Upon successful payment intent complete, a webhook triggers user creation in Supabase
+User receives a magic link via email
+After clicking magic link, they set a password
+They get sent to project-setup (if conditions are met)
+Project Structure
+Each user can have multiple projects. The 'subject' (person the book is about) can be someone they choose to give a Rememoir to, or they themselves can be the subject.
+
+Project Requirements
+A project must have:
+
+Profile: Information about the subject (place they grew up, education, career, major life events, etc.)
+Scheduling: Period by which 'prompts' are sent to the subject via email (weekly on Tuesday, etc.), preferred time (including timezone), subject's email address
+Start date and time: When the subject will receive the first email
+A project is only considered 'set up' once all details have been added
+Dashboard Pages & Features
+Stories Page
+View completed stories
+Edit story text
+Listen to original voice recordings
+See 'prompted by {{name}}' (who added the prompt)
+See creation date and time
+Prompts Page
+Two sections:
+
+Added Prompts (unused only - ones not used for stories yet)
+
+Display: prompt text, name of person who added prompt, voice recording of prompt adder
+Actions: edit prompts, delete prompts
+'Add Prompt' button triggers modal with: prompt text field, 'Record Prompt' feature
+AI Suggested Prompts
+
+Actions: modify suggested prompt, delete suggested prompt, 'Add' to added prompts list
+Adding opens modal for 'Record Prompt', then converts to added prompt with submitter as 'Added by'/'Prompted by'
+Settings Page
+Sections:
+
+Profile: Information about memoir subject (from project setup)
+Scheduling: Same scheduling information as project setup
+Collaborators: List of other user accounts that joined project (name, email, status), remove collaborators, invite new collaborators
+Order Book Page
+Order the book (one included with original payment)
+Choose to include/exclude stories in book
+Re-order stories, select which comes first
+Additional features TBD (add-ons, up-sells, address requirements)
+Navigation & Layout
+Left Side Menu
+Navigation to all pages
+Dropdown with current project and ability to change projects
+'Create New Project' button (functionality TBD)
+Full screen coverage on mobile when burger menu selected
+Additional Required Pages
+Sessions Page
+Multi-step page emailed to subject as scheduled:
+
+Prompt Selection: Subject opens public link, swipes through added prompts, auto-play audio recordings, displays prompt and 'asked by {{name}}'
+Recording Session: Subject clicks 'answer' to chosen prompt, goes to recording step, can listen to prompt again, record/pause/restart recording
+AI Follow-up: After submission, recording is transcribed, AI generates follow-up question
+Second Follow-up: Same recording functionality, AI generates second follow-up after first is answered
+Style Selection: Subject selects story style (First Person, Third Person, Clean Transcript)
+Story Review: AI creates story, presents for review with 'Make Changes' option (record feedback for revision) or 'Finish'/'Story Complete'
+Project Setup Page
+Multi-step form:
+
+"Who is this Rememoir for?" (Gifted Rememoir vs Personal Rememoir)
+Profile information
+Scheduling and start date
+Review and complete
+Routing Logic: Users start on this page if they:
+
+Own only one project
+That project has not been set up
+Warning banner appears on all pages for incomplete projects with button to go to project setup
+Technical Requirements
+React + TypeScript, Tailwind, @radix-ui, @shadcn/ui
+Premium and beautiful design, highly responsive
+@tanstack/react-query, optional zustand
+Forms and validation
+Proper state machines
+Framer motion
+Folder structure with best practices
+Implementation Notes
+Landing page and website managed through Framer (separate from this app)
+No actual APIs or Supabase auth in scope - design front end with placeholders
+Pull dummy data from JSON with notes for future API replacement
+Follow best software design practices
+Complete all pages and features with dummy data where necessary
+Additional Authentication Requirements (Added)
+Supabase Authentication Integration
+JWT Token Management: Implement secure JWT token handling for session management
+Tokens stored securely (localStorage for demo, httpOnly cookies recommended for production)
+Automatic token refresh handling
+Proper token validation on protected routes
+Authentication Pages & Flows
+Login Page (/login): Email/password authentication with Supabase integration placeholders
+Sign Up Page (/signup): User registration with email verification flow
+Set Password Page (/set-password/:token): Initial password setup after magic link
+Forgot Password Page (/forgot-password): Password reset request
+Reset Password Page (/reset-password/:token): Password reset completion
+Security Best Practices
+HTTPS Communication: All auth communication over HTTPS
+Input Validation: Robust client-side validation using zod and react-hook-form
+Route Guards: Client-side routing protection for authenticated/unauthenticated users
+Session Management: Proper session handling with automatic cleanup on logout
+Collaborator Authentication
+Invite System: Email-based invitations for project collaborators
+Role-Based Access: Different permission levels for project owners vs collaborators
+Multi-Project Access: Users can be collaborators on multiple projects
+Integration Points
+Supabase Auth Methods: Placeholder implementations for all Supabase auth functions
+Magic Link Flow: Complete magic link authentication workflow
+Email Verification: User email confirmation process
+Password Policies: Strong password requirements and validation
+State Management
+Auth Store: Zustand store for authentication state management
+Persistent Sessions: Session persistence across browser refreshes
+Automatic Logout: Session cleanup and redirect on authentication errors
+npm run dev
+I've successfully implemented a comprehensive authentication system with Supabase Auth best practices and JWT token handling. Here's what I've created:
+
+🔐 Authentication Implementation
+New Authentication Pages
+Login Page (/login) - Email/password authentication with demo credentials
+Sign Up Page (/signup) - User registration with validation
+Set Password Page (/set-password/:token) - Initial password setup after magic link
+Forgot Password Page (/forgot-password) - Password reset request
+Reset Password Page (/reset-password/:token) - Password reset completion
+Security Features
+JWT Token Simulation - Placeholder functions for Supabase Auth integration
+Route Guards - AuthGuard component protects routes based on authentication status
+Form Validation - Robust validation using zod and react-hook-form
+Password Security - Strong password requirements and confirmation
+Session Management - Persistent auth state with automatic cleanup
+Key Components
+useAuth Hook - Centralized authentication logic with:
+
+Login/logout functionality
+Password management (set, reset, forgot)
+Loading states and error handling
+Session persistence
+AuthGuard Component - Route protection that:
+
+Redirects unauthenticated users from protected routes
+Redirects authenticated users from auth routes
+Shows loading states during auth checks
+Auth Store - Zustand store for:
+
+User state management
+Session persistence
+Secure token handling
+Supabase Integration Ready
+All authentication functions include detailed comments showing exactly which Supabase methods to use:
+
+
+// Example from the code:
+// const { data, error } = await supabase.auth.signInWithPassword({
+//   email: credentials.email,
+//   password: credentials.password,
+// });
+Beautiful UI Design
+Consistent design language across all auth pages
+Smooth animations with Framer Motion
+Responsive layouts for all screen sizes
+Professional gradient backgrounds
+Clear visual feedback for all states
+Demo Features
+Test credentials: test@example.com / password
+Simulated API delays for realistic UX
+Error handling demonstrations
+Success state animations
