@@ -29,6 +29,9 @@ CREATE TYPE story_style AS ENUM ('first-person', 'third-person', 'transcript');
 -- Application logic determines how many follow-ups to generate based on business rules
 CREATE TYPE session_step AS ENUM ('prompts', 'recording', 'followups', 'style_selection', 'story_review', 'completed');
 
+-- Project status for lifecycle management (paused, completed, etc.)
+CREATE TYPE project_status AS ENUM ('setup_pending', 'active', 'paused', 'completed', 'suspended');
+
 -- =====================================================
 -- CORE TABLES - Aligned with project workflows
 -- =====================================================
@@ -50,6 +53,13 @@ CREATE TABLE projects (
     name TEXT NOT NULL, -- Project display name (e.g., "Mom's Life Story")
     description TEXT, -- Optional project description
     is_setup BOOLEAN NOT NULL DEFAULT FALSE, -- "project is only considered 'set up' once all details added"
+    
+    -- Project status and lifecycle management
+    project_status project_status NOT NULL DEFAULT 'setup_pending', -- Current project state
+    paused_at TIMESTAMPTZ, -- When project was paused
+    completed_at TIMESTAMPTZ, -- When project was marked complete
+    session_count INTEGER DEFAULT 0, -- Track number of sessions sent
+    story_count INTEGER DEFAULT 0, -- Track number of stories generated
     
     -- Subject information (person the memoir is about)
     subject_name TEXT NOT NULL, -- Required: who the memoir is about
@@ -108,7 +118,6 @@ CREATE TABLE prompts (
     created_by UUID NOT NULL REFERENCES profiles(id), -- Who added this prompt
     is_ai_suggested BOOLEAN NOT NULL DEFAULT FALSE, -- From AI suggestions or user-created
     is_used BOOLEAN NOT NULL DEFAULT FALSE, -- Has this been answered in a session yet
-    voice_recording_url TEXT, -- Optional: voice recording of person asking prompt
     metadata JSONB DEFAULT '{}', -- AI generation params, categories
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), -- When prompt was created
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), -- When last modified
@@ -141,7 +150,6 @@ CREATE TABLE session_recordings (
     sequence_number INTEGER NOT NULL, -- Order of recording (1=initial, 2=first followup, etc.)
     recording_type TEXT NOT NULL DEFAULT 'answer', -- 'initial_answer', 'followup', 'change_request', etc.
     question_text TEXT, -- The question being answered (original prompt or AI-generated followup)
-    recording_url TEXT, -- URL to audio file in Supabase Storage
     transcription TEXT, -- AI transcription of the recording
     processing_status TEXT DEFAULT 'pending', -- pending, transcribing, completed, failed
     metadata JSONB DEFAULT '{}', -- Extensible data: confidence scores, AI model used, etc.
@@ -177,10 +185,22 @@ CREATE TABLE files (
     storage_path TEXT NOT NULL, -- Full path within bucket
     storage_object TEXT NOT NULL, -- Object name for signed URLs
     uploaded_by UUID NOT NULL REFERENCES profiles(id), -- Who uploaded
-    project_id UUID REFERENCES projects(id), -- Optional: project association
+    project_id UUID NOT NULL REFERENCES projects(id), -- Required: project association
     file_metadata JSONB DEFAULT '{}', -- Duration, thumbnails, processing status
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), -- Upload timestamp
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW() -- Processing updates
+);
+
+-- Session access tokens for secure public session access
+CREATE TABLE session_access_tokens (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), -- Unique token ID
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, -- Which session
+    access_token TEXT NOT NULL UNIQUE, -- Secure token for URL access
+    subject_email TEXT NOT NULL, -- Must match session.subject_email for validation
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '30 days'), -- Token expiration
+    access_count INTEGER DEFAULT 0, -- Track usage for analytics
+    last_accessed_at TIMESTAMPTZ, -- Last time token was used
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW() -- When token was generated
 );
 
 -- Book orders: "order the book (one included with original payment)"
@@ -256,6 +276,10 @@ CREATE INDEX idx_session_recordings_type ON session_recordings(session_id, recor
 CREATE INDEX idx_books_project ON books(project_id); -- Project books
 CREATE INDEX idx_books_payment_status ON books(payment_status); -- Payment tracking
 
+-- Session access token queries (secure public access)
+CREATE INDEX idx_session_access_tokens_token ON session_access_tokens(access_token); -- Token lookup
+CREATE INDEX idx_session_access_tokens_session ON session_access_tokens(session_id); -- Session tokens
+
 -- =====================================================
 -- BUSINESS LOGIC CONSTRAINTS
 -- =====================================================
@@ -299,6 +323,7 @@ CREATE TRIGGER update_sessions_updated_at BEFORE UPDATE ON sessions FOR EACH ROW
 CREATE TRIGGER update_session_recordings_updated_at BEFORE UPDATE ON session_recordings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_stories_updated_at BEFORE UPDATE ON stories FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_files_updated_at BEFORE UPDATE ON files FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_session_access_tokens_updated_at BEFORE UPDATE ON session_access_tokens FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_books_updated_at BEFORE UPDATE ON books FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- =====================================================
@@ -374,6 +399,34 @@ BEGIN
 END;
 $$;
 
+-- Generate secure session access token for public session links
+CREATE OR REPLACE FUNCTION generate_session_access_token(p_session_id UUID)
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER -- Elevated privileges for system operation
+AS $$
+DECLARE
+    token TEXT;
+    session_email TEXT;
+BEGIN
+    -- Get session email for validation
+    SELECT subject_email INTO session_email FROM sessions WHERE id = p_session_id;
+    
+    IF session_email IS NULL THEN
+        RAISE EXCEPTION 'Session not found: %', p_session_id;
+    END IF;
+    
+    -- Generate cryptographically secure token
+    token := encode(gen_random_bytes(32), 'base64url');
+    
+    -- Store token with session reference
+    INSERT INTO session_access_tokens (session_id, access_token, subject_email)
+    VALUES (p_session_id, token, session_email);
+    
+    RETURN token;
+END;
+$$;
+
 -- =====================================================
 -- ROW LEVEL SECURITY - Data access control
 -- =====================================================
@@ -390,6 +443,7 @@ ALTER TABLE stories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE books ENABLE ROW LEVEL SECURITY;
 ALTER TABLE book_stories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE session_access_tokens ENABLE ROW LEVEL SECURITY;
 
 -- PROFILES: Users can only access their own profile data
 CREATE POLICY profiles_own_access ON profiles FOR ALL USING (auth.uid() = id);
@@ -451,14 +505,20 @@ CREATE POLICY prompts_member_modify ON prompts FOR ALL USING (
     )
 );
 
--- SESSIONS: Public read access for session workflow (subjects may not be registered users)
-CREATE POLICY sessions_public_access ON sessions FOR SELECT USING (true);
-
--- SESSIONS: Project members can view all project sessions
-CREATE POLICY sessions_project_access ON sessions FOR SELECT USING (
+-- SESSIONS: Secure token-based access for public sessions and project member access
+CREATE POLICY sessions_secure_access ON sessions FOR SELECT USING (
+    -- Authenticated project members can view project sessions
     EXISTS (
         SELECT 1 FROM project_memberships 
         WHERE project_id = sessions.project_id AND user_id = auth.uid()
+    )
+    OR
+    -- Public access via valid session token
+    EXISTS (
+        SELECT 1 FROM session_access_tokens sat
+        WHERE sat.session_id = sessions.id
+          AND sat.access_token = current_setting('request.headers.session_token', true)
+          AND sat.expires_at > NOW()
     )
 );
 
@@ -487,6 +547,16 @@ CREATE POLICY files_access ON files FOR SELECT USING (
     ))
 );
 
+-- SESSION_ACCESS_TOKENS: Only accessible by project members for their sessions
+CREATE POLICY session_tokens_project_access ON session_access_tokens FOR SELECT USING (
+    EXISTS (
+        SELECT 1 FROM sessions s
+        JOIN project_memberships pm ON s.project_id = pm.project_id
+        WHERE s.id = session_access_tokens.session_id
+          AND pm.user_id = auth.uid()
+    )
+);
+
 -- BOOKS: Project owners can manage book orders
 CREATE POLICY books_owner_access ON books FOR ALL USING (
     EXISTS (
@@ -507,6 +577,7 @@ CREATE POLICY service_role_bypass_all_stories ON stories FOR ALL USING (auth.rol
 CREATE POLICY service_role_bypass_all_files ON files FOR ALL USING (auth.role() = 'service_role');
 CREATE POLICY service_role_bypass_all_books ON books FOR ALL USING (auth.role() = 'service_role');
 CREATE POLICY service_role_bypass_all_book_stories ON book_stories FOR ALL USING (auth.role() = 'service_role');
+CREATE POLICY service_role_bypass_all_session_tokens ON session_access_tokens FOR ALL USING (auth.role() = 'service_role');
 
 -- =====================================================
 -- PERMISSIONS - Database access control
@@ -520,4 +591,93 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO authenticated;
 -- Grant service role full access (required for server-side operations)
 GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO service_role; 
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO service_role;
+
+-- =====================================================
+-- STORAGE BUCKETS - Supabase Storage configuration
+-- =====================================================
+
+-- Main project files bucket (private)
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+    'rememoir-files',
+    'rememoir-files', 
+    false,
+    52428800, -- 50MB limit
+    ARRAY[
+        'audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/webm', 'audio/ogg',
+        'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+        'video/mp4', 'video/webm', 'video/quicktime',
+        'application/pdf', 'text/plain'
+    ]
+);
+
+-- User profile files bucket (for avatars, etc.)
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+    'rememoir-profiles',
+    'rememoir-profiles',
+    false,
+    5242880, -- 5MB limit
+    ARRAY['image/jpeg', 'image/png', 'image/webp']
+);
+
+-- =====================================================
+-- STORAGE POLICIES - File access control
+-- =====================================================
+
+-- Main files bucket policies
+CREATE POLICY "Users can upload to rememoir-files" ON storage.objects
+FOR INSERT WITH CHECK (
+    bucket_id = 'rememoir-files' AND 
+    auth.role() = 'authenticated'
+);
+
+CREATE POLICY "Users can view project files" ON storage.objects
+FOR SELECT USING (
+    bucket_id = 'rememoir-files' AND (
+        -- Project members can access project files
+        EXISTS (
+            SELECT 1 FROM files f
+            JOIN project_memberships pm ON f.project_id = pm.project_id
+            WHERE f.storage_object = storage.objects.name
+              AND pm.user_id = auth.uid()
+        )
+        OR
+        -- File uploader can access their own files
+        auth.uid()::text = (storage.foldername(name))[1]
+    )
+);
+
+CREATE POLICY "Users can update own files" ON storage.objects
+FOR UPDATE USING (
+    bucket_id = 'rememoir-files' AND
+    auth.uid()::text = (storage.foldername(name))[1]
+);
+
+CREATE POLICY "Users can delete own files" ON storage.objects
+FOR DELETE USING (
+    bucket_id = 'rememoir-files' AND (
+        auth.uid()::text = (storage.foldername(name))[1] OR
+        EXISTS (
+            SELECT 1 FROM files f
+            JOIN project_memberships pm ON f.project_id = pm.project_id
+            WHERE f.storage_object = storage.objects.name
+              AND pm.user_id = auth.uid()
+              AND pm.role = 'owner'
+        )
+    )
+);
+
+-- Profile files bucket policies
+CREATE POLICY "Users can manage profile files" ON storage.objects
+FOR ALL USING (
+    bucket_id = 'rememoir-profiles' AND (
+        auth.uid()::text = (storage.foldername(name))[1] OR
+        auth.role() = 'service_role'
+    )
+);
+
+-- Service role bypass for all storage operations
+CREATE POLICY "Service role full storage access" ON storage.objects
+FOR ALL USING (auth.role() = 'service_role'); 
